@@ -1,0 +1,21 @@
+LIBRARY slp.dll
+DESCRIPTION "Service Location Protocol Core Library"
+VERSION 0.8.3
+EXPORTS
+SLPOpen
+SLPClose                                             
+SLPReg
+SLPDereg
+SLPDelAttrs
+SLPFindSrvTypes
+SLPFindSrvs
+SLPFindAttrs
+SLPFindScopes
+SLPParseSrvURL
+SLPParseAttrs
+SLPEscape
+SLPUnescape
+SLPFree                                                 
+SLPGetProperty
+SLPSetProperty
+

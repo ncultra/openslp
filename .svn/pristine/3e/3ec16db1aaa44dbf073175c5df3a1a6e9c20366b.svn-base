@@ -1,0 +1,122 @@
+OpenSLP README
+===============
+
+1 - Introduction
+2 - Roadmap
+3 - Build 
+4 - Install 
+5 - Users Guide
+6 - Developers Guide
+7 - FAQ
+
+
+1 - Introduction
+-----------------
+The OpenSLP project is an effort to develop an open-source implementation of
+Service Location Protocol suitable for commercial and non-commercial 
+application.
+
+The latest version of OpenSLP is 0.9.1  Release notes for this version follow:
+
+OpenSLP 0.9.1 is a bug fix release.  It does not offer any new features, but
+since some the fixed bugs were fairly serious it highly recommended that
+0.9.0 users upgrade. 
+
+The following is a shortened list changes for 0.9.1: 
+- Fixes all known bugs (SourceForge bug tracker 
+  http://sourceforge.net/tracker/?group_id=1730&atid=101730 for details)
+- Minor build changes for BSD
+- Fixed up broken SLPv1 support.Changed includes of the form 
+  "../common/header.h" to "header.h" because of potential breakage for
+  non source directory builds.
+- Added a EPM slp.list.in file and updated configure.in. EPM is an Easy 
+  Package Manager (http://www.easysw.com/epm) that allows easy creation of 
+  different packaging formats.)
+       
+2 - Roadmap
+------------
+OpenSLP is getting very close to being released in beta form.  It is 
+currently useable for most applications, but still lacks a few important
+features:
+    
+    - libslp does not collate results for syncronous calls
+    - libslp does not support asyncronous calls
+
+
+3 - Building OpenSLP
+---------------------
+Building OpenSLP requires the proper installation of automake, autoconf and
+libtool.  To build OpenSLP please use the following steps:
+
+    - Unzip and untar the openslp-x.x.x.tar.gz tarball.
+   
+      $ tar -zxf openslp-x.x.x.tar.gz 
+	  
+    - Run the autogen.sh script to generate configure script. Do not be
+      alarmed if the autogen script prints a few errors.  Try the resulting
+      configure (next step) script anyway.  If the ./configure script already
+      exists, skip running ./autogen.sh
+      
+      $ cd openslp-x.x.x
+      $ ./autogen.sh
+	  
+    - Run the configure script to create openslp make files.  Please note that
+      the configure script accepts several --enable-xxxx and --disable-xxxx
+      options that should be interesting to you.  Run ./configure --help and 
+      read the details of each of these switches. If the configure
+      script fails... now you have a problem.
+     
+      $ ./configure --help
+      $ ./configure
+	  
+    - Run the top level make file (you need to use GNU make)
+    
+      $ make
+	  
+    - If the make is successful, look for the following binaries:
+      
+      slpd/slpd
+      libslp/.libs/libslp.so
+      test/.libs/*
+
+
+4 - Installing OpenSLP       
+-----------------------
+To install OpenSLP make the install target in the top level make file
+    
+    $ make install
+    
+Installation of OpenSLP creates the following files:
+    
+    /usr/sbin/slpd 
+    /usr/lib/libslp.so.x.x (and several appropriate links)
+    /usr/lib/libslp.a 
+    /etc/slp.conf          (old slp.conf is renamed)
+    /etc/slp.reg           (old slp.reg is renamed)
+    
+
+5 - OpenSLP Users Guide 
+------------------------
+Rather than be repetitive in this document, the reader is refered to a fairly
+complete OpenSLP users guide that is available in the doc/html directory
+of the OpenSLP distribution or on the web at:
+    
+    http://www.openslp.org/doc/html/UsersGuide
+    
+The OpenSLp users guide gives instruction on how network and system
+administrators should configure and use OpenSLP once it is installed
+
+
+6 - OpenSLP Programmers Guide
+------------------------------
+Again, to avoid repetition, the reader is refered to a the Programmers Guide
+available in the doc/html directory of the OpenSLP distribution or on the web 
+at:
+   
+    http://www.openslp.org/doc/html/ProgrammersGuide
+    
+    
+7 - FAQ
+--------
+The frequently asked questions have been moved to a faq.html file located in 
+the doc directory of the OpenSLP tarball.  

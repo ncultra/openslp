@@ -1,0 +1,781 @@
+/*-------------------------------------------------------------------------
+ * Copyright (C) 2000 Caldera Systems, Inc
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ *    Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *
+ *    Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ *    Neither the name of Caldera Systems nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * `AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE CALDERA
+ * SYSTEMS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;  LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *-------------------------------------------------------------------------*/
+
+/** Socket-specific functions.
+ *
+ * @file       slpd_socket.c
+ * @author     Matthew Peterson, John Calcote (jcalcote@novell.com)
+ * @attention  Please submit patches to http://www.openslp.org
+ * @ingroup    SlpdCode
+ */
+
+#include "slpd_socket.h"
+#include "slpd_property.h"
+#include "slp_property.h"
+
+#include "slp_message.h"
+#include "slp_xmalloc.h"
+#include "slp_net.h"
+
+/** Sets the socket options to receive broadcast traffic.
+ *
+ * @param[in] sockfd - The socket file descriptor for which to 
+ *    enable broadcast.
+ *
+ * @return Zero on success, or a non-zero value on failure.
+ *
+ * @internal
+ */
+static int EnableBroadcast(sockfd_t sockfd)
+{
+   so_bool_t on = 1;
+   return setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on));
+}
+
+/** Set the multicast interface for a socket.
+ *
+ * @param[in] sockfd - the socket file descriptor for which to set the multicast IF
+ * @param[in] addr - A pointer to the address of the local network interface
+ *
+ * @return Zero on success, or a non-zero value on failure.
+ *
+ * @internal
+ */
+static int SetMulticastIF(int family, sockfd_t sockfd, struct sockaddr_storage * addr)
+{
+   if (SLPNetIsIPV4() && ((family == AF_INET) || (family == AF_UNSPEC)))
+      return setsockopt(sockfd, IPPROTO_IP, IP_MULTICAST_IF, 
+                        (char*)(&(((struct sockaddr_in*)addr)->sin_addr)), sizeof(struct in_addr));
+   else if (SLPNetIsIPV6() && ((family == AF_INET6) || (family == AF_UNSPEC)))
+      return setsockopt(sockfd, IPPROTO_IPV6, IPV6_MULTICAST_IF, 
+                          (char*)(&((struct sockaddr_in6 *)addr)->sin6_scope_id), sizeof(unsigned int));
+   return -1;
+}
+
+/** Set the socket options for ttl (time-to-live).
+ *
+ * @param[in] sockfd - the socket file descriptor for which to set TTL state.
+ * @param[in] ttl - A boolean value indicating whether to enable or disable
+ *    the time-to-live option.
+ *
+ * @return Zero on success, or a non-zero value on failure.
+ *
+ * @internal
+ */
+static int SetMulticastTTL(int family, sockfd_t sockfd, int ttl)
+{
+   if (SLPNetIsIPV4() && ((family == AF_INET) || (family == AF_UNSPEC)))
+   {
+#if defined(linux) || defined(_WIN32)
+      int optarg = ttl;
+#else
+      /*Solaris and Tru64 expect an unsigned char parameter*/
+      unsigned char optarg = (unsigned char)ttl;
+#endif
+      return setsockopt(sockfd, IPPROTO_IP, IP_MULTICAST_TTL, (char *)&optarg, sizeof(optarg));
+   }
+   else if (SLPNetIsIPV6() && ((family == AF_INET6) || (family == AF_UNSPEC)))
+   {
+      int optarg = ttl;
+      return setsockopt(sockfd, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, (char *)&optarg, sizeof(optarg));
+   }
+   return -1;
+}
+
+/** Configures a socket to receive mcast on a specified interface.
+ *
+ * @param[in] family - The address family of the multicast group to join.
+ * @param[in] sockfd - The socket file descriptor to set the options on.
+ * @param[in] maddr - A pointer to multicast group to join.
+ * @param[in] addr - A pointer to address of the interface to join on.
+ *
+ * @return Zero on success, or a non-zero value on failure.
+ *
+ * @internal
+ */
+static int JoinSLPMulticastGroup(int family, sockfd_t sockfd,
+      struct sockaddr_storage * maddr, struct sockaddr_storage * addr)
+{
+   int optresult = -1; /*error in address family specified*/
+
+   if (SLPNetIsIPV4() && family == AF_INET)
+   {
+      struct ip_mreq mreq4;
+
+      /* join using the multicast address passed in */
+      memcpy(&mreq4.imr_multiaddr, &(((struct sockaddr_in *)maddr)->sin_addr), 
+            sizeof(struct in_addr));
+
+      /* join with specified interface */
+      memcpy(&mreq4.imr_interface, &(((struct sockaddr_in *)addr)->sin_addr), 
+            sizeof(struct in_addr));
+
+      optresult = setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq4,
+                                 sizeof(mreq4)); 
+   }
+   else if (SLPNetIsIPV6() && family == AF_INET6)
+   {
+      struct ipv6_mreq mreq6;
+
+      /* join using the multicast address passed in */
+      memcpy(&mreq6.ipv6mr_multiaddr, &(((struct sockaddr_in6 *)
+            maddr)->sin6_addr), sizeof(struct in6_addr));
+
+      /* join with specified interface */
+      mreq6.ipv6mr_interface = ((struct sockaddr_in6 *)addr)->sin6_scope_id;
+
+      optresult = setsockopt(sockfd, IPPROTO_IPV6, IPV6_JOIN_GROUP, 
+                                (char*)&mreq6, sizeof(mreq6));   
+   }
+
+   return optresult; 
+}
+
+/** Configures a socket NOT to receive mcast traffic on an interface.
+ *
+ * @param[in] family - The address family (AF_INET or AF_INET6).
+ * @param[in] sockfd - The socket file descriptor to set the options on.
+ * @param[in] maddr - A pointer to the multicast address
+ * @param[in] addr - A pointer to the multicast address
+ *
+ * @return Zero on success, or a non-zero value on failure.
+ *
+ * @internal
+ */
+/* static */ int DropSLPMulticastGroup(int family, sockfd_t sockfd, 
+      struct sockaddr_storage * maddr, struct sockaddr_storage * addr)
+{
+   if (SLPNetIsIPV4() && family == AF_INET)
+   {
+      struct ip_mreq mreq4;
+
+      /* drop from the multicast group passed in */
+      memcpy(&mreq4.imr_multiaddr, &(((struct sockaddr_in *)maddr)->sin_addr), 
+            sizeof(struct in_addr));
+
+      /* drop for the specified interface */
+      memcpy(&mreq4.imr_interface, &(((struct sockaddr_in *)addr)->sin_addr), 
+            sizeof(struct in_addr));
+
+      return setsockopt(sockfd, IPPROTO_IP, IP_DROP_MEMBERSHIP, 
+            (char*)&mreq4,sizeof(mreq4));               
+   }
+
+   if (SLPNetIsIPV6() && family == AF_INET6)
+   {
+      struct ipv6_mreq    mreq6;
+
+      /* drop from the multicast group passed in */
+      memcpy(&mreq6.ipv6mr_multiaddr, &(((struct sockaddr_in6 *)maddr)->
+            sin6_addr), sizeof(struct in6_addr));
+
+      /* drop for the specified interface */
+      mreq6.ipv6mr_interface = 0;
+
+      return setsockopt(sockfd, IPPROTO_IPV6, IPV6_LEAVE_GROUP, 
+            (char *)&mreq6,sizeof(mreq6));               
+   }
+
+   return -1; /* error in address family specified */
+}
+
+/** Binds the specified socket to the SLP port and interface.
+ *
+ * @param[in] family - The address family (AF_INET or AF_INET6).
+ * @param[in] sock - The socket to be bound.
+ * @param[in] addr - The address to bind to.
+ *
+ * @return Zero on success, -1 on error.
+ *
+ * @internal
+ */
+static int BindSocketToInetAddr(int family, sockfd_t sock, 
+      struct sockaddr_storage * addr)
+{
+   struct sockaddr_storage temp_addr;
+   int result;
+   int reuse = 1;
+   int addrsz = 0;
+
+   if (SLPNetIsIPV4() && family == AF_INET)
+   {
+      if (addr == 0)
+      {
+         addr = &temp_addr;
+       memset(addr, 0, sizeof(struct sockaddr_storage));
+#ifdef HAVE_SOCKADDR_STORAGE_SS_LEN
+         addr->ss_len = sizeof(struct sockaddr_in);
+#endif
+         addr->ss_family = AF_INET;
+         ((struct sockaddr_in *)addr)->sin_addr.s_addr = INADDR_ANY;
+      }
+      ((struct sockaddr_in *)addr)->sin_port = htons(G_SlpdProperty.port);
+      addrsz = sizeof(struct sockaddr_in);
+   }
+   else if (SLPNetIsIPV6() && family == AF_INET6)
+   {
+      if (addr == 0)
+      {
+         addr = &temp_addr;
+       memset(addr, 0, sizeof(struct sockaddr_storage));
+#ifdef HAVE_SOCKADDR_STORAGE_SS_LEN
+         addr->ss_len = sizeof(struct sockaddr_in6);
+#endif
+         addr->ss_family = AF_INET6;
+         memcpy(&((struct sockaddr_in6*)addr)->sin6_addr, 
+               &slp_in6addr_any, sizeof(struct in6_addr));
+      }
+      ((struct sockaddr_in6*)addr)->sin6_port = htons(G_SlpdProperty.port);
+      addrsz = sizeof(struct sockaddr_in6);
+   }
+
+   result = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
+   result = bind(sock, (struct sockaddr *)addr, addrsz);
+#ifndef _WIN32
+   if (result == 0)
+   {
+      /* Set the receive and send buffer low water mark to 18 bytes 
+       * (the length of the smallest slpv2 message). Note that Winsock
+       * doesn't support these socket level options, so we skip them.
+       */
+      int lowat = 18;
+      setsockopt(sock, SOL_SOCKET, SO_RCVLOWAT, 
+            (char *)&lowat, sizeof(lowat));
+      setsockopt(sock, SOL_SOCKET, SO_SNDLOWAT, 
+            (char *)&lowat, sizeof(lowat));
+   }
+#endif
+   return result;
+}
+
+/** Binds a socket to a port of the loopback interface.
+ *
+ * @param[in] family - The address family (AF_INET or AF_INET6).
+ * @param[in] sock - The socket to be bound.
+ *
+ * @return Zero on success, -1 on error.
+ *
+ * @internal
+ */
+/* static */ int BindSocketToLoopback(int family, int sock)
+{
+   struct sockaddr_storage loaddr;
+
+   if (SLPNetIsIPV4() && family == AF_INET)
+   {
+      memset(&loaddr, 0, sizeof(struct sockaddr_in)); /*Some platforms require sin_zero to be 0*/
+#ifdef HAVE_SOCKADDR_STORAGE_SS_LEN
+      ((struct sockaddr_in*) &loaddr)->sin_len = sizeof(struct sockaddr_in);
+#endif
+      ((struct sockaddr_in*) &loaddr)->sin_family = AF_INET;
+      ((struct sockaddr_in*) &loaddr)->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+      return BindSocketToInetAddr(AF_INET, sock, &loaddr);
+   }
+
+   if (SLPNetIsIPV6() && family == AF_INET6)
+   {
+#ifdef HAVE_SOCKADDR_STORAGE_SS_LEN
+      ((struct sockaddr_in6*) &loaddr)->sin6_len = sizeof(struct sockaddr_in6);
+#endif
+      ((struct sockaddr_in6*) &loaddr)->sin6_family = AF_INET6;
+      memcpy(&(((struct sockaddr_in6 *)&loaddr)->sin6_addr), 
+            &slp_in6addr_loopback, sizeof(struct in6_addr));
+      ((struct sockaddr_in6*) &loaddr)->sin6_scope_id = 0;
+      return BindSocketToInetAddr(AF_INET6, sock,&loaddr);
+   }
+
+   return -1;  /* error in address family specified */
+}
+
+/** Allocate memory for a new SLPDSocket.
+ *
+ * @return A pointer to a newly allocated SLPDSocket, or NULL if out of
+ *    memory.
+ */
+SLPDSocket * SLPDSocketAlloc(void)
+{
+   SLPDSocket * sock;
+
+   sock = (SLPDSocket*)xmalloc(sizeof(SLPDSocket));
+   if (sock)
+   {
+      memset(sock,0,sizeof(SLPDSocket));
+      sock->fd = SLP_INVALID_SOCKET;
+   }
+   return sock;
+}
+
+/**
+ * Sets the SO_SNDBUF and SO_RCVBUF values on a given socket.
+ *
+ * @param[in] sock - the socket file descriptor for which to set the
+ *                     SO_SNDBUF and SO_RCVBUF values.
+ *
+ */
+void SLPDSocketSetSendRecvBuff(sockfd_t sock)
+{
+#ifndef _WIN32
+   int sndbufSize;
+   int rcvBufSize;
+
+   SLPPropertyInternalGetSndRcvBufSize(&sndbufSize, &rcvBufSize);
+   if (sndbufSize)
+   {
+       setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sndbufSize, sizeof(int));
+   }
+
+   if (rcvBufSize)
+   {
+       setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvBufSize, sizeof(int));
+   }
+#else
+	(void)sock;
+#endif
+}
+
+/** Frees memory associated with the specified SLPDSocket.
+ *
+ * @param[in] sock - A pointer to the socket to free.
+ */
+void SLPDSocketFree(SLPDSocket * sock)
+{
+   /* close the socket descriptor */
+   if (sock->fd != SLP_INVALID_SOCKET)
+      closesocket(sock->fd);
+
+   /* free receive buffer */
+   if (sock->recvbuf)
+      SLPBufferFree(sock->recvbuf);
+
+   /* free send buffer(s) */
+   if (sock->sendlist.count)
+      while (sock->sendlist.count)
+      {
+         if(sock->sendbuf == (SLPBuffer) sock->sendlist.head)
+            sock->sendbuf = 0;
+         SLPBufferFree((SLPBuffer)SLPListUnlink(&sock->sendlist, sock->sendlist.head));
+      }
+
+   if (sock->sendbuf)
+      SLPBufferFree(sock->sendbuf);                        
+
+   /* free the actual socket structure */
+   xfree(sock);
+}
+
+/** Creates a datagram buffer for a remote address.
+ *
+ * @param[in] peeraddr - The address of the peer to connect to.
+ * @param[in] type - The type of the datagram; one of DATAGRAM_UNICAST, 
+ *    DATAGRAM_MULTICAST or DATAGRAM_BROADCAST.
+ *
+ * @return A datagram socket SLPDSocket->state will be set to
+ *    DATAGRAM_UNICAST, DATAGRAM_MULTICAST or DATAGRAM_BROADCAST.
+ */
+SLPDSocket * SLPDSocketCreateDatagram(struct sockaddr_storage * peeraddr,
+      int type)
+{
+   SLPDSocket * sock;
+
+   sock = SLPDSocketAlloc();
+   if (sock)
+   {
+      /* G_SlpdProperty.MTU is as big as a datagram SLP     */
+      /* can be.                                               */
+      sock->recvbuf = SLPBufferAlloc(G_SlpdProperty.MTU);
+      sock->sendbuf = SLPBufferAlloc(G_SlpdProperty.MTU);
+      if (sock->recvbuf && sock->sendbuf)
+      {
+         if (peeraddr->ss_family == AF_INET)
+            sock->fd = socket(PF_INET, SOCK_DGRAM, 0);
+         else if (peeraddr->ss_family == AF_INET6)
+            sock->fd = socket(PF_INET6, SOCK_DGRAM, 0);
+         else
+            sock->fd = SLP_INVALID_SOCKET;  /* only IPv4 (and soon IPv6) are supported */
+
+         if (sock->fd != SLP_INVALID_SOCKET)
+         {
+            SLPDSocketSetSendRecvBuff(sock->fd);
+            switch(type)
+            {
+               case DATAGRAM_BROADCAST:
+                  EnableBroadcast(sock->fd);
+                  break;
+
+               case DATAGRAM_MULTICAST:
+               /* @todo SetMulticastIF should be called here as well, but this function is currently only
+                  used with DATAGRAM_BROADCAST and DATAGRAM_UNICAST*/
+                  SetMulticastTTL(peeraddr->ss_family, sock->fd, G_SlpdProperty.multicastTTL);
+                  break;
+
+               default:
+                  break;
+            }
+            memcpy(&sock->peeraddr, peeraddr, sizeof(struct sockaddr_storage));
+            if (peeraddr->ss_family == AF_INET) 
+            {
+               ((struct sockaddr_in*) &(sock->peeraddr))->sin_port 
+                     = htons(G_SlpdProperty.port);
+               sock->state = type;
+            }
+            else if (peeraddr->ss_family == AF_INET6) 
+            {
+               /* @todo if DATAGRAM_MULTICAST is ever used with this function, we may want to
+                  clear out the scope id*/
+               ((struct sockaddr_in6*) &(sock->peeraddr))->sin6_port 
+                     = htons(G_SlpdProperty.port);
+               sock->state = type;
+            }
+            else 
+            {
+               SLPDSocketFree(sock);
+               sock = 0;
+            }
+         }
+         else
+         {
+            SLPDSocketFree(sock);
+            sock = 0;
+         }
+      }
+      else
+      {
+         SLPDSocketFree(sock);
+         sock = 0;
+      }
+   }
+   return sock;
+} 
+
+/** Flags an SLPDSocket as useable for sending multicast packets
+ *
+ * @param[in] family - the socket family
+ * @param[in] psock - the socket to set up the multicast options on
+ *
+ * @return 0 if successful.
+ *
+ * This is used by SLPDIncoming to flag which sockets are to be used
+ * for sending to multicast addresses
+ */
+int SLPDSocketAllowMcastSend(int family, SLPDSocket* psock)
+{
+   int result = SetMulticastIF(family, psock->fd, &psock->localaddr);
+   if(result == 0)
+      result = SetMulticastTTL(family, psock->fd, G_SlpdProperty.multicastTTL);
+   if(result == 0)
+      psock->can_send_mcast = 1;
+
+   return result;
+}
+
+/** Creates and binds a datagram buffer for a remote address.
+ *
+ * @param[in] myaddr - The address of the interface to join mcast on.
+ * @param[in] peeraddr - The address of the peer to connect to.
+ * @param[in] type - The type of datagram; one of DATAGRAM_UNICAST, 
+ *    DATAGRAM_MULTICAST or DATAGRAM_BROADCAST.
+ *
+ * @return A datagram socket SLPDSocket->state will be set to
+ *    DATAGRAM_UNICAST, DATAGRAM_MULTICAST or DATAGRAM_BROADCAST.
+ */
+SLPDSocket * SLPDSocketCreateBoundDatagram(struct sockaddr_storage * myaddr,
+      struct sockaddr_storage * peeraddr, int type)
+{
+   SLPDSocket * sock;
+
+   /* create and bind socket */
+   sock = SLPDSocketAlloc();
+   if (sock)
+   {
+      sock->recvbuf = SLPBufferAlloc(G_SlpdProperty.MTU);
+      sock->sendbuf = SLPBufferAlloc(G_SlpdProperty.MTU);
+      if (SLPNetIsIPV4() && peeraddr->ss_family == AF_INET)
+         sock->fd = socket(PF_INET, SOCK_DGRAM, 0);
+      else if (SLPNetIsIPV6() && peeraddr->ss_family == AF_INET6)
+         sock->fd = socket(PF_INET6, SOCK_DGRAM, 0);
+      else
+         sock->fd = SLP_INVALID_SOCKET;  /* only ipv4 and ipv6 are supported */
+
+      if (sock->fd != SLP_INVALID_SOCKET)
+      {
+         SLPDSocketSetSendRecvBuff(sock->fd);
+#ifdef _WIN32
+         if (BindSocketToInetAddr(peeraddr->ss_family, 
+               sock->fd, myaddr) == 0)
+#else
+         if (BindSocketToInetAddr(peeraddr->ss_family, 
+               sock->fd, peeraddr) == 0)
+#endif
+         {
+            if (peeraddr != 0)
+               memcpy((struct sockaddr_storage*) &sock->peeraddr, peeraddr, 
+                     sizeof(struct sockaddr_storage));
+
+            if (myaddr != 0)
+               memcpy((struct sockaddr_storage*) &sock->localaddr, myaddr, 
+                     sizeof(struct sockaddr_storage));
+
+            switch(type)
+            {
+               case DATAGRAM_MULTICAST:
+                  if (JoinSLPMulticastGroup(peeraddr->ss_family, sock->fd, 
+                        peeraddr, myaddr) == 0)
+                  {
+                     /* store mcast address */
+                     memcpy(&(sock->mcastaddr), peeraddr, 
+                           sizeof(struct sockaddr_storage));
+                     sock->state = DATAGRAM_MULTICAST;
+                     goto SUCCESS;
+                  }
+                  break;
+
+               case DATAGRAM_BROADCAST:
+                  if (myaddr->ss_family == AF_INET 
+                        && EnableBroadcast(sock->fd) == 0)
+                  {
+                     sock->state = DATAGRAM_BROADCAST;
+                     goto SUCCESS;
+                  }
+                  break;
+
+               case DATAGRAM_UNICAST:
+               default:
+                  sock->state = DATAGRAM_UNICAST;
+                  goto SUCCESS;
+            }
+         }
+      }
+   }
+
+   if (sock)
+      SLPDSocketFree(sock);
+   sock = 0;
+
+SUCCESS:    
+
+   return sock;    
+}
+
+/** Creates an SLP listen socket.
+ *
+ * @param[in] peeraddr - The address of the peer to connect to.
+ *
+ * @return A listening socket. SLPDSocket->state will be set to 
+ *    SOCKET_LISTEN. Returns NULL on error.
+ */
+SLPDSocket * SLPDSocketCreateListen(struct sockaddr_storage * peeraddr)
+{
+   SLPDSocket * sock;
+
+   sock = SLPDSocketAlloc();
+   if (sock)
+   {
+      if (SLPNetIsIPV4() && peeraddr->ss_family == AF_INET)
+         sock->fd = socket(PF_INET, SOCK_STREAM, 0);
+      else if (SLPNetIsIPV6() && peeraddr->ss_family == AF_INET6)
+         sock->fd = socket(PF_INET6, SOCK_STREAM, 0);
+      else
+         sock->fd = SLP_INVALID_SOCKET;  /* only ipv4 (and soon ipv6) are supported */
+
+      if (sock->fd != SLP_INVALID_SOCKET)
+      {
+         if (BindSocketToInetAddr(peeraddr->ss_family, 
+               sock->fd, peeraddr) >= 0)
+         {
+            if (listen(sock->fd,5) == 0)
+            {
+               if (peeraddr != 0)
+                  memcpy((struct sockaddr_storage *)&sock->localaddr, peeraddr, 
+                        sizeof(struct sockaddr_storage));
+
+               /* Set socket to non-blocking so subsequent calls to
+                  accept will *never* block */
+#ifdef _WIN32
+               {
+                  u_long fdflags = 1;
+                  ioctlsocket(sock->fd, FIONBIO, &fdflags);
+               }
+#else
+               {
+                  int fdflags = fcntl(sock->fd, F_GETFL, 0);
+                  fcntl(sock->fd,F_SETFL, fdflags | O_NONBLOCK);
+               }
+#endif        
+               sock->state = SOCKET_LISTEN;
+               return sock;
+            }
+         }
+      }
+   }
+
+   if (sock)
+      SLPDSocketFree(sock);
+
+   return 0;
+}
+
+/** Determines if a socket is listening on an address.
+ *
+ * @param[in] sock - The socket to check.
+ * @param[in] addr - The address to check for.
+ *
+ * @return A non-zero value if the socket is listening on @p addr,
+ *    otherwise zero.
+ */
+int SLPDSocketIsMcastOn(SLPDSocket * sock, struct sockaddr_storage * addr)
+{
+   switch (sock->mcastaddr.ss_family) 
+   {
+      case AF_INET:
+         if (memcmp(&(((struct sockaddr_in *)&sock->mcastaddr)->sin_addr), 
+               &(((struct sockaddr_in*) addr)->sin_addr), 
+               sizeof(struct in_addr)) == 0)
+            return 1;
+         else
+            return 0;
+
+      case AF_INET6:
+         if (memcmp(&(((struct sockaddr_in6 *)&sock->mcastaddr)->sin6_addr), 
+               &(((struct sockaddr_in6*) addr)->sin6_addr), 
+               sizeof(struct in6_addr)) == 0)
+            return 1;
+         else
+            return 0;
+
+      default:
+         /* only IPv4 and IPv6 are supported */
+         return 0;
+   }
+}
+
+/** Create a connected socket.
+ *
+ * @param[in] addr - The address of the peer to connect to.
+ *
+ * @return A connected socket or a socket in the process of being connected
+ *    if the socket was connected the SLPDSocket->state will be set to 
+ *    writable. If the connect would block, SLPDSocket->state will be set 
+ *    to connect; NULL on error.
+ */
+SLPDSocket * SLPDSocketCreateConnected(struct sockaddr_storage * addr)
+{
+   SLPDSocket * sock = 0;
+
+   sock = SLPDSocketAlloc();
+   if (sock == 0)
+      goto FAILURE;
+
+   /* create the stream socket */
+   if (addr->ss_family == AF_INET)
+      sock->fd = socket(PF_INET,SOCK_STREAM,0);
+   else if (addr->ss_family == AF_INET6)
+      sock->fd = socket(PF_INET6,SOCK_STREAM,0);
+   else
+      sock->fd = SLP_INVALID_SOCKET;
+
+   if (sock->fd == SLP_INVALID_SOCKET)
+      goto FAILURE;                        
+
+   /* set the socket to non-blocking */
+#ifdef _WIN32
+   {
+      u_long fdflags = 1;
+      ioctlsocket(sock->fd, FIONBIO, &fdflags);
+   }
+#else
+   {
+      int fdflags = fcntl(sock->fd, F_GETFL, 0);
+      fcntl(sock->fd,F_SETFL, fdflags | O_NONBLOCK);
+   }
+#endif  
+
+   /* zero then set peeraddr to connect to */
+   if (addr->ss_family == AF_INET) 
+   {
+      sock->peeraddr.ss_family = AF_INET;
+      ((struct sockaddr_in *)&(sock->peeraddr))->sin_addr 
+            = ((struct sockaddr_in*) addr)->sin_addr;
+      ((struct sockaddr_in *)&(sock->peeraddr))->sin_port 
+            = htons(G_SlpdProperty.port);
+   }
+   else if (addr->ss_family == AF_INET6) 
+   {
+      sock->peeraddr.ss_family = AF_INET6;
+      ((struct sockaddr_in6 *)&(sock->peeraddr))->sin6_addr 
+            = ((struct sockaddr_in6*) addr)->sin6_addr;
+      ((struct sockaddr_in6 *)&(sock->peeraddr))->sin6_port 
+            = htons(G_SlpdProperty.port);
+   }
+   else 
+      goto FAILURE;  /* only ipv4 and ipv6 addresses are supported */
+
+#ifndef _WIN32
+   {
+      /* Set the receive and send buffer low water mark to 18 bytes 
+       * (the length of the smallest slpv2 message). Note that Winsock
+       * doesn't support these socket level options, so we skip them.
+       */
+      int lowat = 18;
+      setsockopt(sock->fd, SOL_SOCKET, SO_RCVLOWAT, 
+            (char *)&lowat, sizeof(lowat));
+      setsockopt(sock->fd, SOL_SOCKET, SO_SNDLOWAT, 
+            (char *)&lowat, sizeof(lowat));
+   }
+#endif
+
+   /* non-blocking connect */
+   if (connect(sock->fd, (struct sockaddr *)&sock->peeraddr, 
+         sizeof(sock->peeraddr)) == 0)
+      sock->state = STREAM_CONNECT_IDLE; /* Connection occured immediately */
+   else
+   {
+#ifdef _WIN32
+      if (WSAEWOULDBLOCK == WSAGetLastError())
+#else
+      if (errno == EINPROGRESS)
+#endif
+         sock->state = STREAM_CONNECT_BLOCK; /* Connect would have blocked */
+      else
+         goto FAILURE;
+   }                   
+   return sock;
+
+   /* cleanup on failure */
+FAILURE:
+
+   if (sock)
+      SLPDSocketFree(sock);
+   sock = 0;
+   return sock;
+}
+
+/*=========================================================================*/

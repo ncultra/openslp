@@ -1,0 +1,20 @@
+Basic Installation
+==================
+
+To install OpenSLP use the following command from the top-level OpenSLP
+directory:
+
+	make install
+	
+Since installation scripts copy files to protected areas of the filesystem
+(/usr/bin, /usr/doc, and /usr/lib), you will need to su to root before 
+running make install
+	
+
+
+Makefiles
+==========
+
+Yeah... the OpenSLP make files are pretty bad.  Please be patient, better make
+files will be comming soon. 
+

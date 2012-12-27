@@ -1,0 +1,28 @@
+============================================================================
+
+OpenSLP Change Log
+------------------
+
+Please make entries to this log (in addition to the CVS log) that describe 
+major changes to the OpenSLP code base.  An entries should be separated by
+blank lines and include the date, developer's email, and change description.
+
+=============================================================================
+
+05/15/00 mpeterson@calderasystems.com
+Fixed a major bug that caused the library to freeze when slp.conf was changed
+
+05/15/00 mpeterson@calderasystems.com
+Brushed up traceMsg a little more.  Needs a little more work to be really
+useful.  The framework is there though.	 
+ 
+05/12/00 mpeterson@calderasystems.com
+Add framework to support traceMsg functionality.  Still needs a little 
+brushing up, but the main part is done.
+
+05/03/00 mpeterson@calderasystems.com
+This is another sample entry to show that entries should be separated by
+blank lines.
+
+05/03/00 mpeterson@calderasystems.com
+This is a sample entry.  Please make your entries look like this

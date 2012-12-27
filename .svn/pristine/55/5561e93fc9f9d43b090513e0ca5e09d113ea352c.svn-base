@@ -1,0 +1,33 @@
+Announcement
+------------
+As of  version 0.8.1, the Win32 port of OpenSLP has been broken.  I guess this
+is what happens when no one is taking care of a port. 
+
+Beginning with 0.8.2  Matt Peterson will personally take over the Win32 port. 
+The eventual goal is to fully support OpenSLP on Win32.  The reasons for
+full support of the Win32 "platform" are related to the fact that Micro$oft
+insists on supporting location protocols other than the one designed by the
+IETF.  The hope is that by offering a really good port of OpenSLP, Microsoft
+enslaved developers and partners will have some ammunition to fight
+proprietary or otherwise inoperable protocols.
+
+Current State
+-------------
+Currently the OpenSLP code base will not work on Win32.  Libslp does work,
+but MSVC files included in 0.8.2 are not set up to build anything.  They are
+place holders for working files that will be included in 0.8.3.  In other
+words, wait for 0.8.3.  
+
+Schedule
+--------
+OpenSLP 0.8.2 - Reorganize location of MSVC files and clean libsmbclient
+OpenSLP 0.8.3 - Clean slpd and test on Win2000 and Win98 "platforms"
+OpenSLP 0.9.0 - Provide installable binaries
+
+Credits
+-------
+The work currently being done in no way invalidates the contribution of
+Matthieu Desmons and Rick Brady who did the original port of the 0.7.x
+codebase.  Most of the actual code changes can still be attributed to them
+as well as the initive to to show that the port was actually possible.
+

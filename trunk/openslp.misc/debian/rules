@@ -1,0 +1,125 @@
+#!/usr/bin/make -f
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+# This is the debhelper compatability version to use.
+export DH_COMPAT=1
+
+# shared library versions, option 1
+version=1.0.1
+major=1
+
+DEB_BUILD_GNU_CPU ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_CPU)
+DEB_BUILD_GNU_SYSTEM ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_SYSTEM)
+DEB_BUILD_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
+
+ifeq ($(DEB_BUILD_GNU_SYSTEM),kfreebsd-gnu)
+DEB_BUILD_GNU_TYPE := $(DEB_BUILD_GNU_CPU)-gnu
+endif
+ifeq ($(DEB_BUILD_GNU_SYSTEM),knetbsd-gnu)
+DEB_BUILD_GNU_TYPE := $(DEB_BUILD_GNU_CPU)-gnu
+endif
+
+build: build-stamp
+build-stamp:
+	dh_testdir
+
+	# allow running from CVS
+	test -e autogen.sh -a ! -e configure  &&  sh autogen.sh
+
+	cp -f /usr/share/misc/config.{guess,sub} .
+	touch Makefile.in # work around patch timestamp problems
+	./configure --prefix=/usr \
+	            --mandir=\$${prefix}/share/man \
+	            --infodir=\$${prefix}/share/info \
+	            --enable-slpv1 \
+	            --enable-async-api \
+	            --enable-slpv2-security \
+		    $(DEB_BUILD_GNU_TYPE)
+			  
+	# Compile the package.
+	$(MAKE)
+
+	touch build-stamp
+
+clean:
+	dh_testdir
+	dh_testroot
+	rm -f build-stamp
+
+	# Clean up after the build process.
+	-$(MAKE) distclean
+
+	dh_clean
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_clean -k
+	dh_installdirs
+
+	# Install the package into debian/tmp.
+	$(MAKE) install DESTDIR=`pwd`/debian/tmp
+
+
+# Build architecture-independent files here.
+binary-indep: 
+	dh_testdir -i
+	dh_testroot -i
+	dh_installdocs -i -XCVS
+	dh_installchangelogs -i ChangeLog
+	dh_compress -i
+	dh_installdeb -i
+	dh_gencontrol -i
+	dh_md5sums -i
+	dh_builddeb -i
+
+# Build architecture-dependent files here.
+binary-arch: build install
+	dh_testdir -a
+	dh_testroot -a
+	# start slpd before slapd to allow slapd to register 
+	dh_installinit -a -- "defaults 18 80"
+	dh_installdocs -a -XCVS
+
+        # build libslp${major} package by moving files from slpd package
+	dh_movefiles -plibslp$(major)        \
+               usr/lib/libslp.so.$(major)    \
+               usr/lib/libslp.so.$(version)
+
+
+        # build libslp-dev package by moving files from slpd package
+	dh_movefiles -plibslp-dev usr/include usr/lib
+
+        # build slptool package by moving files from slpd package
+	dh_movefiles -pslptool usr/bin/slptool
+
+	# Remove the installed html documentation (we'll pull it in by 
+        # install-docs) into openslp-doc package
+	rm -rf debian/tmp/usr/doc
+
+        # remove empty directories in slpd package
+	rmdir debian/tmp/usr/include
+	rmdir debian/tmp/usr/lib
+
+	dh_installexamples -a
+#	dh_installmenu
+#	dh_installcron
+	dh_installdebconf -a
+	dh_installman -pslpd debian/slpd.8 
+	dh_installman -pslptool debian/slptool.1
+	dh_installchangelogs -a ChangeLog
+	dh_link -a
+	dh_strip -a
+	dh_compress -a
+	dh_fixperms -a
+	dh_makeshlibs -a
+	dh_installdeb -a
+	dh_shlibdeps -a
+	dh_gencontrol -a
+	dh_md5sums -a 
+	dh_builddeb -a
+
+binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install
