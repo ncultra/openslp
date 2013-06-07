@@ -72,6 +72,17 @@ class SLPHandle:
 
     def close(self):
         self.slph.close()
+    
+    def associate_if_list(self, mcast_if_list):
+        err = self.slph.associate_if_list(mcast_if_list)
+        if err != SLPError.SLP_OK:
+            raise SLPError(err)
+
+    def associate_ip(self, unicast_ip):
+        err = self.slph.associate_ip(unicast_ip)
+        if err != SLPError.SLP_OK:
+            raise SLPError(err)
+
 
     def register(self, srvurl, lifetime, attrs = "", callback = None,
                  cbdata = None):

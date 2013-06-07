@@ -56,6 +56,10 @@ cdef extern from "slp.h":
 
     SLPError SLPOpen(char *lang, SLPBoolean isasync, SLPHandle *phslp)
     void SLPClose(SLPHandle hSLP)
+
+    SLPError SLPAssociateIFList(SLPHandle hSLP, char* McastIFList)
+    SLPError SLPAssociateIP(SLPHandle hSLP, char* unicast_ip)
+
     SLPError SLPReg(SLPHandle hSLP, char *pcSrvURL, unsigned short usLifetime,
                     char *pcSrvType, char *pcAttrs, SLPBoolean fresh,
                     SLPRegReport callback, void *pvCookie)
@@ -138,6 +142,12 @@ cdef class SLPConn:
     def close(self):
         SLPClose(self.slph)
         self.slph = NULL
+    
+    def associate_if_list(self, char *mcast_if_list):
+            return SLPAssociateIFList(self.slph, mcast_if_list)
+   
+    def associate_ip(self, char *unicast_ip):
+        return SLPAssociateIP(self.slph, unicast_ip)
 
     # register an SLP service
     def register(self, char *srvurl, unsigned lifetime, char *attrs,
