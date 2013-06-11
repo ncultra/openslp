@@ -1,0 +1,96 @@
+Abstract Service Type: Hypervisor
+
+Name of submitter: "Mike Day" <ncultra@gmail.com>
+Language of service template: en
+Security Considerations: 
+	 See concrete template(s) for any. 
+
+Template Text:
+--------------------template begins here--------------------
+template-type=hypervisor
+
+template-version=0.1
+
+template-description=
+	This is an abstract service type to organize all hypervisor
+	service-templates into one category.
+	
+
+template-url-syntax=
+	url-path; depends upon the concrete service type.
+		; see concrete service:hypervisor: templates.
+
+--------------------template ends here--------------------
+
+Concrete Service Type: KVM host
+
+Name of submitter: "Mike Day" <ncultra@gmail.com>
+Language of service template: en
+Security Considerations:
+	 This template provides information about libvirt access
+	 points and active security protocols.
+
+Template Text:
+--------------------template begins here--------------------
+template-type=service:hypervisor:KVM
+
+template-version=0.1
+
+template-description=
+	This is a concrete service type for the KVM hypervisor. It
+	provides enough information about the KVM hypervisor host to establish a
+	libvirt connection to that host.
+
+templat-url-syntax=
+	url-path	= host-part '/' path-part '?' descriminator
+	user@host-part  = URL host compenent
+	path-part	= path-part / path-part, path-part
+	descriminator   = tag / tag, tag
+	tag		= safe-char *[safe-char/white space] safe-char
+
+	;; for example (from /etc/libvirt/libvirt.conf): 
+	;; qemu+ssh://root@hail.cloud.example.com/system
+	;; qemu+ssh://root@sleet.cloud.example.com/system
+	;; uri_default = qemu:///system
+
+	;; tags are optional to make the protocol more efficient:
+	;; qemu:///system?kimchi,openstack
+	
+;; attributes are those data useful to make a libvirt connection to
+   the host
+tls_port= string LO	; the port where the host is accepting TLS
+	  	   	; connections. (No TLS support if not present)
+
+tcp_port= string L 	; the port where the host is accepting TCP
+	  	 	; connections.
+
+--------------------template ends here--------------------
+
+template-type=service:hypervisor:kimchi
+
+template-version=0.1
+
+template-description=
+	This is a concrete service type for the Kimchi - the KVM
+	hypervisor's REST API. It provdes only enough information for
+	a client to connect to the kimchi REST access point.
+
+templat-url-syntax=
+	url-path	= user@host-part '/' path-part 
+	user@host-part  = URL host compenent
+	path-part	= path-part / path-part, path-part
+
+
+	;; for example:
+	;; http://user@host/kimchi
+
+;; attributes are those data useful to make a connection to
+   kimchi on the host
+tls_port= string LO	; the port where the host is accepting TLS
+	  	   	; connections. (No TLS support if not present)
+
+tcp_port= string L 	; the port where the host is accepting TCP
+	  	 	; connections.
+
+--------------------template ends here--------------------
+
